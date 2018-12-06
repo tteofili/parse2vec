@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -34,21 +35,13 @@ public class Parse2Vec {
     public static void main(String[] args) throws Exception {
         Path path = Paths.get("src/test/resources/text");
 
-        //        MapWordVectorTable sentenceEmbeddings = new MapWordVectorTable(new HashMap<>());
-
-        // todo : transformation matrix from words/sentences to pos
-
-//        InputStream tokenizerModelStream = new FileInputStream("src/test/resources/en-token.bin");
         InputStream sentenceModelStream = new FileInputStream("src/test/resources/en-sent.bin");
         InputStream parserModelStream = new FileInputStream("src/test/resources/en-parser-chunking.bin");
         try {
-//            TokenizerModel tokenizerModel = new TokenizerModel(tokenizerModelStream);
-//            Tokenizer tokenizer = new TokenizerME(tokenizerModel);
 
             // train word embeddings
             int layerSize = 100;
             Word2Vec word2Vec = new Word2Vec.Builder()
-//                    .tokenizerFactory(new OpenNLPTokenizerFactory(tokenizer))
                     .tokenizerFactory(new DefaultTokenizerFactory())
                     .epochs(5)
                     .layerSize(layerSize)
@@ -65,10 +58,10 @@ public class Parse2Vec {
             File dir = path.toFile();
 
             MapWordVectorTable ptEmbeddings = extractPTEmbeddings(layerSize, word2Vec, sentenceDetector, parser, dir);
-            writeEmbeddingsAsTSV(ptEmbeddings, "pt");
+            writeEmbeddingsAsTSV(ptEmbeddings, "pt", 1);
 
             MapWordVectorTable parsePathWordEmbeddings = extractPTPathWordEmbeddings(word2Vec, sentenceDetector, parser, dir, ptEmbeddings);
-            writeEmbeddingsAsTSV(parsePathWordEmbeddings, "pt-word");
+            writeEmbeddingsAsTSV(parsePathWordEmbeddings, "pt-word", 1);
 
         } finally {
             sentenceModelStream.close();
@@ -76,21 +69,28 @@ public class Parse2Vec {
         }
     }
 
-    private static void writeEmbeddingsAsTSV(MapWordVectorTable wordVectorTable, String prefix) throws IOException {
-        Iterator<String> tokens = wordVectorTable.tokens();
+    static void writeEmbeddingsAsTSV(MapWordVectorTable wordVectorTable, String prefix, int decimals) throws IOException {
+        double rounding = Math.pow(10, decimals);
+        Charset charset = Charset.forName("UTF-8");
+        byte[] tabBytes = "\t".getBytes(charset);
+        byte[] crBytes = "\n".getBytes(charset);
+
         FileOutputStream vectorsFileStream = new FileOutputStream(prefix + "-vectors.tsv");
         FileOutputStream metadataFileStream = new FileOutputStream(prefix + "-metadata.tsv");
+
+        Iterator<String> tokens = wordVectorTable.tokens();
         try {
             while (tokens.hasNext()) {
                 String pt = tokens.next();
-                metadataFileStream.write(pt.getBytes(Charset.defaultCharset()));
-                metadataFileStream.write("\n".getBytes(Charset.defaultCharset()));
-
+                metadataFileStream.write(pt.getBytes(charset));
+                metadataFileStream.write(crBytes);
                 float[] array = wordVectorTable.get(pt).toFloatBuffer().array();
-                String s = Arrays.toString(array);
-                s = s.replaceAll(", ", "\t").substring(1, s.length() - 2);
-                vectorsFileStream.write(s.getBytes(Charset.defaultCharset()));
-                vectorsFileStream.write("\n".getBytes(Charset.defaultCharset()));
+                for (float f : array) {
+                    double v = Math.round(f * rounding) / rounding;
+                    vectorsFileStream.write(String.valueOf(v).getBytes(charset));
+                    vectorsFileStream.write(tabBytes);
+                }
+                vectorsFileStream.write(crBytes);
             }
         } finally {
             metadataFileStream.flush();
@@ -239,72 +239,4 @@ public class Parse2Vec {
         }
     }
 
-    private static class OpenNLPTokenizerFactory implements TokenizerFactory {
-
-        private final Tokenizer tokenizer;
-
-        private OpenNLPTokenizerFactory(Tokenizer tokenizer) {
-            this.tokenizer = tokenizer;
-        }
-
-        @Override
-        public org.deeplearning4j.text.tokenization.tokenizer.Tokenizer create(String s) {
-            return new OpenNLPTokenizer(s);
-        }
-
-        @Override
-        public org.deeplearning4j.text.tokenization.tokenizer.Tokenizer create(InputStream inputStream) {
-            try {
-                return new OpenNLPTokenizer(IOUtils.toString(inputStream));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        @Override
-        public void setTokenPreProcessor(TokenPreProcess tokenPreProcess) {
-
-        }
-
-        @Override
-        public TokenPreProcess getTokenPreProcessor() {
-            return null;
-        }
-
-        private class OpenNLPTokenizer implements org.deeplearning4j.text.tokenization.tokenizer.Tokenizer {
-            private String[] currentTokens;
-            private int tokenCounter = 0;
-
-            OpenNLPTokenizer(String text) {
-                this.currentTokens = tokenizer.tokenize(text);
-            }
-
-            @Override
-            public boolean hasMoreTokens() {
-                return this.tokenCounter < this.currentTokens.length;
-            }
-
-            @Override
-            public int countTokens() {
-                return currentTokens.length;
-            }
-
-            @Override
-            public String nextToken() {
-                String token = currentTokens[tokenCounter];
-                tokenCounter++;
-                return token;
-            }
-
-            @Override
-            public List<String> getTokens() {
-                return Arrays.asList(currentTokens);
-            }
-
-            @Override
-            public void setTokenPreProcessor(TokenPreProcess tokenPreProcess) {
-
-            }
-        }
-    }
 }
