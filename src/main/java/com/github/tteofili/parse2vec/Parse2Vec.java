@@ -10,6 +10,11 @@ import opennlp.tools.sentdetect.SentenceModel;
 import opennlp.tools.tokenize.Tokenizer;
 import opennlp.tools.util.wordvector.WordVector;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.math3.linear.MatrixUtils;
+import org.apache.commons.math3.linear.SingularValueDecomposition;
+import org.deeplearning4j.models.embeddings.WeightLookupTable;
+import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
+import org.deeplearning4j.models.word2vec.VocabWord;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.text.documentiterator.FileDocumentIterator;
 import org.deeplearning4j.text.tokenization.tokenizer.TokenPreProcess;
@@ -30,10 +35,15 @@ import java.util.*;
 
 public class Parse2Vec {
 
+    enum Method {
+        CLUSTER,
+        SUM
+    }
+
     private static Logger logger = LoggerFactory.getLogger(Parse2Vec.class);
 
     public static void main(String[] args) throws Exception {
-        Path path = Paths.get("src/test/resources/text");
+        Path path = Paths.get("src/test/resources/test-text");
 
         InputStream sentenceModelStream = new FileInputStream("src/test/resources/en-sent.bin");
         InputStream parserModelStream = new FileInputStream("src/test/resources/en-parser-chunking.bin");
@@ -57,16 +67,49 @@ public class Parse2Vec {
 
             File dir = path.toFile();
 
-            MapWordVectorTable ptEmbeddings = extractPTEmbeddings(layerSize, word2Vec, sentenceDetector, parser, dir);
-            writeEmbeddingsAsTSV(ptEmbeddings, "pt", 1);
+            if (dir.listFiles() != null) { // thanks Francesco
+                MapWordVectorTable ptEmbeddings = extractPTEmbeddings(layerSize, word2Vec, sentenceDetector, parser, dir);
+                writeEmbeddingsAsTSV(ptEmbeddings, "pt", 1);
 
-            MapWordVectorTable parsePathWordEmbeddings = extractPTPathWordEmbeddings(word2Vec, sentenceDetector, parser, dir, ptEmbeddings);
-            writeEmbeddingsAsTSV(parsePathWordEmbeddings, "pt-word", 1);
+                MapWordVectorTable parsePathWordEmbeddings = extractPTPathWordEmbeddings(word2Vec, sentenceDetector, parser,
+                        dir, ptEmbeddings);
+                writeEmbeddingsAsTSV(parsePathWordEmbeddings, "pt-word", 1);
+
+                MapWordVectorTable parsePathSentenceEmbeddings = extractPTPathSentenceEmbeddings(sentenceDetector,
+                        parser, dir, ptEmbeddings, parsePathWordEmbeddings, 3, layerSize);
+                writeEmbeddingsAsTSV(parsePathSentenceEmbeddings, "pt-sentence", 1);
+            }
 
         } finally {
             sentenceModelStream.close();
             parserModelStream.close();
         }
+    }
+
+    private static MapWordVectorTable extractPTPathSentenceEmbeddings(SentenceDetectorME sentenceDetector,
+                                                                      Parser parser, File dir, MapWordVectorTable ptEmbeddings,
+                                                                      MapWordVectorTable parsePathWordEmbeddings,
+                                                                      int k, int layerSize) throws IOException {
+        logger.info("extracting parse tree enriched sentence embeddings");
+        MapWordVectorTable parsePathSentenceEmbeddings = new MapWordVectorTable(new HashMap<>());
+        for (File f : dir.listFiles()) {
+            if (!f.getName().startsWith(".")) {
+                logger.info("processing file {}", f);
+                for (String line : IOUtils.readLines(new FileInputStream(f), Charset.defaultCharset())) {
+                    String[] sentences = sentenceDetector.sentDetect(line);
+                    for (String sentence : sentences) {
+                        Parse[] topParses = ParserTool.parseLine(sentence, parser, 1);
+                        for (Parse topParse : topParses) {
+                            INDArray sentenceVector = getSentenceVector(ptEmbeddings, parsePathWordEmbeddings,
+                                    topParse, k, layerSize, Method.CLUSTER);
+                            String id = sentence.replaceAll(" ", "_").replaceAll("\t", "").replaceAll("\n", "").replaceAll("\r", "");
+                            parsePathSentenceEmbeddings.put(id, new FloatArrayVector(sentenceVector.toFloatVector()));
+                        }
+                    }
+                }
+            }
+        }
+        return parsePathSentenceEmbeddings;
     }
 
     static void writeEmbeddingsAsTSV(MapWordVectorTable wordVectorTable, String prefix, int decimals) throws IOException {
@@ -102,7 +145,7 @@ public class Parse2Vec {
     }
 
     @NotNull
-    private static MapWordVectorTable extractPTPathWordEmbeddings(Word2Vec word2Vec, SentenceDetectorME sentenceDetector, Parser parser, File dir, MapWordVectorTable ptEmbeddings) throws IOException {
+    private static MapWordVectorTable extractPTPathWordEmbeddings(WordVectors word2Vec, SentenceDetectorME sentenceDetector, Parser parser, File dir, MapWordVectorTable ptEmbeddings) throws IOException {
         logger.info("extracting parse tree enriched word embeddings");
         MapWordVectorTable parsePathWordEmbeddings = new MapWordVectorTable(new HashMap<>());
         for (File f : dir.listFiles()) {
@@ -120,7 +163,7 @@ public class Parse2Vec {
                                 for (Parse tn : tagNodes) {
                                     String word = tn.getCoveredText();
                                     if (word != null) {
-                                        INDArray vector = word2Vec.getLookupTable().vector(word);
+                                        INDArray vector = word2Vec.getWordVectorMatrix(word);
                                         if (vector != null) {
                                             INDArray originalWordVector = vector.dup();
                                             Parse parent;
@@ -151,7 +194,7 @@ public class Parse2Vec {
     }
 
     @NotNull
-    private static MapWordVectorTable extractPTEmbeddings(int layerSize, Word2Vec word2Vec, SentenceDetectorME sentenceDetector, Parser parser, File dir) throws IOException {
+    private static MapWordVectorTable extractPTEmbeddings(int layerSize, WordVectors wordVectors, SentenceDetectorME sentenceDetector, Parser parser, File dir) throws IOException {
         logger.info("extracting parse tree embeddings");
         MapWordVectorTable ptEmbeddings = new MapWordVectorTable(new HashMap<>());
         for (File f : dir.listFiles()) {
@@ -168,7 +211,7 @@ public class Parse2Vec {
                                 Parse[] tagNodes = p.getTagNodes();
                                 // record pt embeddings for leaf nodes
                                 for (Parse tn : tagNodes) {
-                                    INDArray vector = word2Vec.getLookupTable().vector(tn.getCoveredText());
+                                    INDArray vector = wordVectors.getWordVectorMatrix(tn.getCoveredText());
                                     if (vector != null) {
                                         String type = tn.getType();
                                         if (type != null && type.trim().length() > 0) {
@@ -237,6 +280,90 @@ public class Parse2Vec {
         if (!parents.isEmpty()) {
             getPTEmbeddings(ptEmbeddings, layerSize, parents.toArray(new Parse[0]));
         }
+    }
+
+
+    private static INDArray getSentenceVector(MapWordVectorTable ptEmbeddings, MapWordVectorTable parsePathWordEmbeddings,
+                                              Parse parseTree, int k, int layerSize, Method method) {
+
+        Parse[] children = parseTree.getChildren();
+        if (children.length == 0) {
+            String coveredText = parseTree.getCoveredText();
+            WordVector wordVector = parsePathWordEmbeddings.get(coveredText);
+            INDArray vector = null;
+            if (wordVector != null) {
+                vector = Nd4j.create(wordVector.toFloatBuffer().array());
+            } else {
+                logger.warn("cannot get word vector for {}", coveredText);
+                WordVector ptVector = ptEmbeddings.get(parseTree.getType());
+                if (ptVector != null) {
+                    vector = Nd4j.create(ptVector.toFloatBuffer().array());
+                } else {
+                    logger.warn("cannot get pt vector for {}", parseTree.getType());
+                }
+            }
+            if (vector == null) {
+                logger.error("cannot get vector for {}", parseTree.toString());
+                vector = Nd4j.zeros(1, layerSize);
+            }
+            return vector;
+
+        } else {
+            INDArray chvs = Nd4j.zeros(children.length, layerSize);
+            int i = 0;
+            for (Parse desc : children) {
+                INDArray chv = getSentenceVector(ptEmbeddings, parsePathWordEmbeddings, desc, k, layerSize, method);
+                chvs.putRow(i, chv);
+                i++;
+            }
+
+            INDArray hv = Nd4j.create(ptEmbeddings.get(parseTree.getType()).toFloatBuffer().array());
+            double[][] centroids;
+            if (chvs.rows() > k) {
+                centroids = getTruncatedVT(chvs, k);
+            } else if (chvs.rows() == 1) {
+                centroids = getDoubles(chvs.getRow(0));
+            } else {
+                centroids = getTruncatedVT(chvs, 1);
+            }
+            switch (method) {
+                case CLUSTER:
+                    INDArray matrix = Nd4j.zeros(centroids.length + 1, layerSize);
+                    matrix.putRow(0, hv);
+                    for (int c = 0; c < centroids.length; c++) {
+                        matrix.putRow(c + 1, Nd4j.create(centroids[c]));
+                    }
+                    hv = Nd4j.create(getTruncatedVT(matrix, 1));
+                    break;
+                case SUM:
+                    for (double[] centroid : centroids) {
+                        hv.addi(Nd4j.create(centroid));
+                    }
+                    break;
+            }
+
+            return hv;
+        }
+    }
+
+    private static double[][] getTruncatedVT(INDArray matrix, int k) {
+        double[][] data = getDoubles(matrix);
+
+        SingularValueDecomposition svd = new SingularValueDecomposition(MatrixUtils.createRealMatrix(data));
+
+        double[][] truncatedVT = new double[k][svd.getVT().getColumnDimension()];
+        svd.getVT().copySubMatrix(0, k - 1, 0, truncatedVT[0].length - 1, truncatedVT);
+        return truncatedVT;
+    }
+
+    private static double[][] getDoubles(INDArray matrix) {
+        double[][] data = new double[matrix.rows()][matrix.columns()];
+        for (int i = 0; i < data.length; i++) {
+            for (int j = 0; j < data[0].length; j++) {
+                data[i][j] = matrix.getDouble(i, j);
+            }
+        }
+        return data;
     }
 
 }
