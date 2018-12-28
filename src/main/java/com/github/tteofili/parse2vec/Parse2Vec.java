@@ -23,6 +23,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 
+/**
+ * Basic runner for pars2vec over a directory of text files
+ */
 public class Parse2Vec {
 
     enum Method {
@@ -63,7 +66,7 @@ public class Parse2Vec {
 
             File dir = path.toFile();
 
-            if (dir.listFiles() != null) { // thanks Francesco
+            if (dir.listFiles() != null) {
                 MapWordVectorTable ptEmbeddings = extractPTEmbeddings(layerSize, word2Vec, sentenceDetector, parser, dir);
                 EmbeddingsUtils.writeEmbeddingsAsTSV(ptEmbeddings, "pt", 1);
 
