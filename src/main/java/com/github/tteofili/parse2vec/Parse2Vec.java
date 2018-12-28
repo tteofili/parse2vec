@@ -45,7 +45,7 @@ public class Parse2Vec {
         try {
 
             // train word embeddings
-            int layerSize = 100;
+            int layerSize = args.length > 1 && args[1] != null ? Integer.parseInt(args[1]) : 100;
             LuceneTokenizerFactory tokenizerFactory = new LuceneTokenizerFactory();
             Word2Vec word2Vec = new Word2Vec.Builder()
                     .tokenizerFactory(tokenizerFactory)
@@ -132,7 +132,7 @@ public class Parse2Vec {
                     // todo : normalize text, eventually
                     String[] sentences = sentenceDetector.sentDetect(line);
                     for (String sentence : sentences) {
-                        Parse2VecUtils.getPTEmbeddingFromSentence(layerSize, wordVectors, parser, ptEmbeddings, sentence);
+                        Parse2VecUtils.getPTEmbeddingsFromSentence(layerSize, wordVectors, parser, ptEmbeddings, sentence);
                     }
                 }
             }

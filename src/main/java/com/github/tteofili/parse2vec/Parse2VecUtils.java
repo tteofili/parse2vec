@@ -7,6 +7,7 @@ import opennlp.tools.util.wordvector.WordVector;
 import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
 import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
 import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.exception.ND4JIllegalStateException;
 import org.nd4j.linalg.factory.Nd4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,12 +41,12 @@ class Parse2VecUtils {
             String coveredText = parseTree.getCoveredText().trim();
             WordVector wordVector = parsePathWordEmbeddings.get(coveredText);
             INDArray vector = null;
-            if (wordVector != null) {
+            if (wordVector != null && wordVector.dimension() == layerSize) {
                 vector = Nd4j.create(wordVector.toFloatBuffer().array());
             } else {
                 logger.warn("cannot find word vector for {}", coveredText);
                 WordVector ptVector = ptEmbeddings.get(parseTree.getType());
-                if (ptVector != null) {
+                if (ptVector != null && ptVector.dimension() == layerSize) {
                     vector = Nd4j.create(ptVector.toFloatBuffer().array());
                 } else {
                     logger.warn("cannot find pt vector for {}", parseTree.getType());
@@ -131,7 +132,8 @@ class Parse2VecUtils {
         }
     }
 
-    static void getPTEmbeddingFromSentence(int layerSize, WordVectors wordVectors, Parser parser, MapWordVectorTable ptEmbeddings, String sentence) {
+    static void getPTEmbeddingsFromSentence(int layerSize, WordVectors wordVectors, Parser parser,
+                                           MapWordVectorTable ptEmbeddings, String sentence) {
         Parse[] topParses = ParserTool.parseLine(sentence, parser, 1);
         for (Parse topParse : topParses) {
             // exclude TOPs
@@ -140,7 +142,7 @@ class Parse2VecUtils {
                 // record pt embeddings for leaf nodes
                 for (Parse tn : tagNodes) {
                     INDArray vector = wordVectors.getWordVectorMatrix(tn.getCoveredText());
-                    if (vector != null) {
+                    if (vector != null && vector.columns() == layerSize) {
                         String type = tn.getType();
                         if (type != null && type.trim().length() > 0) {
                             if (ptEmbeddings.get(type) == null) {
@@ -148,9 +150,11 @@ class Parse2VecUtils {
                             } else {
                                 INDArray[] ar = new INDArray[2];
                                 WordVector wordVector = ptEmbeddings.get(type);
-                                ar[0] = Nd4j.create(wordVector.toFloatBuffer().array());
-                                ar[1] = vector.dup();
-                                ptEmbeddings.put(type, new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat()));
+                                if (wordVector != null && wordVector.dimension() == layerSize) {
+                                    ar[0] = Nd4j.create(wordVector.toFloatBuffer().array());
+                                    ar[1] = vector.dup();
+                                    ptEmbeddings.put(type, new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat()));
+                                }
                             }
                         }
                     }
@@ -160,11 +164,11 @@ class Parse2VecUtils {
                 // recurse bottom up until TOP
                 getPTEmbeddings(ptEmbeddings, layerSize, tagNodes);
             }
-
         }
     }
 
     private static void getPTEmbeddings(MapWordVectorTable ptEmbeddings, int layerSize, Parse[] parses) {
+        // collect parents
         Set<Parse> parents = new HashSet<>();
         for (Parse t : parses) {
             Parse parent = t.getParent();
@@ -172,6 +176,7 @@ class Parse2VecUtils {
                 parents.add(parent);
             }
         }
+        // get PT embedding for each parent as average of children PT embeddings
         for (Parse parent : parents) {
             String type = parent.getType();
             if (type != null && type.trim().length() > 0) {
@@ -183,7 +188,7 @@ class Parse2VecUtils {
                     String childType = child.getType();
                     if (childType != null && childType.trim().length() > 0) {
                         WordVector childVector = ptEmbeddings.get(childType);
-                        if (childVector != null) {
+                        if (childVector != null && childVector.dimension() == layerSize) {
                             INDArray vector = Nd4j.create(childVector.toFloatBuffer().array());
                             ar[i] = vector != null ? vector : Nd4j.zeros(1, layerSize);
                         } else {
