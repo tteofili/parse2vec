@@ -72,7 +72,7 @@ public class Parse2Vec {
             if (dir.listFiles() != null) {
                 MapWordVectorTable ptEmbeddings = extractPTEmbeddings(layerSize, word2Vec, sentenceDetector, parser, dir, tokenizerFactory);
                 checkEmbeddings(ptEmbeddings, layerSize);
-                EmbeddingsUtils.writeEmbeddingsAsTSV(ptEmbeddings, "pt", 1);
+                EmbeddingsUtils.writeEmbeddingsAsTSV(ptEmbeddings, "pt-tags", 1);
 
                 MapWordVectorTable parsePathWordEmbeddings = extractPTPathWordEmbeddings(word2Vec, sentenceDetector, parser,
                         dir, ptEmbeddings, tokenizerFactory);
