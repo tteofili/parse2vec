@@ -7,7 +7,6 @@ import opennlp.tools.util.wordvector.WordVector;
 import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
 import org.deeplearning4j.text.tokenization.tokenizerfactory.TokenizerFactory;
 import org.nd4j.linalg.api.ndarray.INDArray;
-import org.nd4j.linalg.exception.ND4JIllegalStateException;
 import org.nd4j.linalg.factory.Nd4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,19 +36,20 @@ class Parse2VecUtils {
                                               Parse parseTree, int k, int layerSize, Parse2Vec.Method method, TokenizerFactory tokenizerFactory) {
 
         Parse[] children = parseTree.getChildren();
+        String type = parseTree.getType();
         if (children.length == 0) {
-            String coveredText = parseTree.getCoveredText().trim();
+            String coveredText = tokenizerFactory.create(parseTree.getCoveredText()).nextToken();
             WordVector wordVector = parsePathWordEmbeddings.get(coveredText);
             INDArray vector = null;
             if (wordVector != null && wordVector.dimension() == layerSize) {
                 vector = Nd4j.create(wordVector.toFloatBuffer().array());
             } else {
                 logger.warn("cannot find word vector for {}", coveredText);
-                WordVector ptVector = ptEmbeddings.get(parseTree.getType());
+                WordVector ptVector = ptEmbeddings.get(type);
                 if (ptVector != null && ptVector.dimension() == layerSize) {
                     vector = Nd4j.create(ptVector.toFloatBuffer().array());
                 } else {
-                    logger.warn("cannot find pt vector for {}", parseTree.getType());
+                    logger.warn("cannot find pt vector for {}", type);
                 }
             }
             if (vector == null) {
@@ -67,37 +67,43 @@ class Parse2VecUtils {
                 i++;
             }
 
-            INDArray hv = Nd4j.create(ptEmbeddings.get(parseTree.getType()).toFloatBuffer().array());
-            double[][] centroids;
-            if (chvs.rows() > k) {
-                centroids = EmbeddingsUtils.getTruncatedVT(chvs, k);
-            } else if (chvs.rows() == 1) {
-                centroids = EmbeddingsUtils.getDoubles(chvs.getRow(0));
-            } else {
-                centroids = getTruncatedVT(chvs, 1);
-            }
-            switch (method) {
-                case CLUSTER:
-                    INDArray matrix = Nd4j.zeros(centroids.length + 1, layerSize);
-                    matrix.putRow(0, hv);
-                    for (int c = 0; c < centroids.length; c++) {
-                        matrix.putRow(c + 1, Nd4j.create(centroids[c]));
-                    }
-                    hv = Nd4j.create(getTruncatedVT(matrix, 1));
-                    break;
-                case SUM:
-                    for (double[] centroid : centroids) {
-                        hv.addi(Nd4j.create(centroid));
-                    }
-                    break;
-            }
+            WordVector ptVector = ptEmbeddings.get(type);
+            if (ptVector != null) {
+                INDArray hv = Nd4j.create(ptVector.toFloatBuffer().array());
+                double[][] centroids;
+                if (chvs.rows() > k) {
+                    centroids = EmbeddingsUtils.getTruncatedVT(chvs, k);
+                } else if (chvs.rows() == 1) {
+                    centroids = EmbeddingsUtils.getDoubles(chvs.getRow(0));
+                } else {
+                    centroids = getTruncatedVT(chvs, 1);
+                }
+                switch (method) {
+                    case CLUSTER:
+                        INDArray matrix = Nd4j.zeros(centroids.length + 1, layerSize);
+                        matrix.putRow(0, hv);
+                        for (int c = 0; c < centroids.length; c++) {
+                            matrix.putRow(c + 1, Nd4j.create(centroids[c]));
+                        }
+                        hv = Nd4j.create(getTruncatedVT(matrix, 1));
+                        break;
+                    case SUM:
+                        for (double[] centroid : centroids) {
+                            hv.addi(Nd4j.create(centroid));
+                        }
+                        break;
+                }
 
-            return hv;
+                return hv;
+            } else {
+                logger.warn("cannot find pt embedding for {}", type);
+                return Nd4j.zeros(1, layerSize);
+            }
         }
     }
 
     static void getPTPathWordEmbeddings(WordVectors wordVectors, Parser parser, MapWordVectorTable ptEmbeddings,
-                                        MapWordVectorTable parsePathWordEmbeddings, String sentence) {
+                                        MapWordVectorTable parsePathWordEmbeddings, String sentence, TokenizerFactory tokenizerFactory) {
         Parse[] topParses = ParserTool.parseLine(sentence, parser, 1);
         for (Parse topParse : topParses) {
             // exclude TOPs
@@ -105,7 +111,7 @@ class Parse2VecUtils {
                 Parse[] tagNodes = p.getTagNodes();
                 // record pt path word embeddings for leaf nodes
                 for (Parse tn : tagNodes) {
-                    String word = tn.getCoveredText();
+                    String word = tokenizerFactory.create(tn.getCoveredText()).nextToken();
                     if (word != null) {
                         INDArray vector = wordVectors.getWordVectorMatrix(word);
                         if (vector != null) {
@@ -133,7 +139,7 @@ class Parse2VecUtils {
     }
 
     static void getPTEmbeddingsFromSentence(int layerSize, WordVectors wordVectors, Parser parser,
-                                           MapWordVectorTable ptEmbeddings, String sentence) {
+                                           MapWordVectorTable ptEmbeddings, String sentence, TokenizerFactory tokenizerFactory) {
         Parse[] topParses = ParserTool.parseLine(sentence, parser, 1);
         for (Parse topParse : topParses) {
             // exclude TOPs
@@ -141,7 +147,8 @@ class Parse2VecUtils {
                 Parse[] tagNodes = p.getTagNodes();
                 // record pt embeddings for leaf nodes
                 for (Parse tn : tagNodes) {
-                    INDArray vector = wordVectors.getWordVectorMatrix(tn.getCoveredText());
+                    String coveredText = tokenizerFactory.create(tn.getCoveredText()).nextToken();
+                    INDArray vector = wordVectors.getWordVectorMatrix(coveredText);
                     if (vector != null && vector.columns() == layerSize) {
                         String type = tn.getType();
                         if (type != null && type.trim().length() > 0) {
@@ -153,7 +160,12 @@ class Parse2VecUtils {
                                 if (wordVector != null && wordVector.dimension() == layerSize) {
                                     ar[0] = Nd4j.create(wordVector.toFloatBuffer().array());
                                     ar[1] = vector.dup();
-                                    ptEmbeddings.put(type, new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat()));
+                                    FloatArrayVector avg = new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat());
+                                    assert avg.dimension() == layerSize : "wrong size of averaged word vector " + avg.dimension()
+                                            + " for type " + type;
+                                    ptEmbeddings.put(type, avg);
+                                    if (wordVector.dimension() > 1000)
+                                     logger.info("{} (leaf)", wordVector.dimension());
                                 }
                             }
                         }
@@ -202,7 +214,22 @@ class Parse2VecUtils {
                 if (existingParentVector != null) {
                     ar[children.length] = Nd4j.create(existingParentVector.toFloatBuffer().array());
                 }
-                ptEmbeddings.put(parent.getType(), new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat()));
+                int j = 0;
+                for (INDArray a : ar) {
+                    if (j < children.length) {
+                        Parse child = children[j];
+                        assert a.columns() == layerSize : "array for " + child.toString() + "(" + child.getType() + ") of wrong size " + a.columns();
+                        j++;
+                    } else if (existingParentVector != null) {
+                        assert a.columns() == layerSize : "array for existing parent ("+type+") of wrong size " + a.columns();
+                    }
+                }
+                FloatArrayVector wordVector = new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat());
+                assert wordVector.dimension() == layerSize : "wrong size of averaged word vector " + wordVector.dimension()
+                    + " for type " + type;
+                ptEmbeddings.put(parent.getType(), wordVector);
+                if (wordVector.dimension() > 1000)
+                    logger.info("{}", wordVector.dimension());
             }
         }
         if (!parents.isEmpty()) {
