@@ -38,7 +38,8 @@ class Parse2VecUtils {
         Parse[] children = parseTree.getChildren();
         String type = parseTree.getType();
         if (children.length == 0) {
-            String coveredText = tokenizerFactory.create(parseTree.getCoveredText()).nextToken();
+            String coveredText = tokenizerFactory.create(parseTree.getCoveredText()).hasMoreTokens() ?
+                    tokenizerFactory.create(parseTree.getCoveredText()).nextToken() : parseTree.getCoveredText();
             WordVector wordVector = parsePathWordEmbeddings.get(coveredText);
             INDArray vector = null;
             if (wordVector != null && wordVector.dimension() == layerSize) {
@@ -111,7 +112,8 @@ class Parse2VecUtils {
                 Parse[] tagNodes = p.getTagNodes();
                 // record pt path word embeddings for leaf nodes
                 for (Parse tn : tagNodes) {
-                    String word = tokenizerFactory.create(tn.getCoveredText()).nextToken();
+                    String word = tokenizerFactory.create(tn.getCoveredText()).hasMoreTokens() ?
+                            tokenizerFactory.create(tn.getCoveredText()).nextToken() : tn.getCoveredText();
                     if (word != null) {
                         INDArray vector = wordVectors.getWordVectorMatrix(word);
                         if (vector != null) {
@@ -147,7 +149,8 @@ class Parse2VecUtils {
                 Parse[] tagNodes = p.getTagNodes();
                 // record pt embeddings for leaf nodes
                 for (Parse tn : tagNodes) {
-                    String coveredText = tokenizerFactory.create(tn.getCoveredText()).nextToken();
+                    String coveredText = tokenizerFactory.create(tn.getCoveredText()).hasMoreTokens() ?
+                            tokenizerFactory.create(tn.getCoveredText()).nextToken() : tn.getCoveredText();
                     INDArray vector = wordVectors.getWordVectorMatrix(coveredText);
                     if (vector != null && vector.columns() == layerSize) {
                         String type = tn.getType();
@@ -220,9 +223,7 @@ class Parse2VecUtils {
                         Parse child = children[j];
                         assert a.columns() == layerSize : "array for " + child.toString() + "(" + child.getType() + ") of wrong size " + a.columns();
                         j++;
-                    } else if (existingParentVector != null) {
-                        assert a.columns() == layerSize : "array for existing parent ("+type+") of wrong size " + a.columns();
-                    }
+                    } else assert existingParentVector == null || existingParentVector.dimension() == layerSize : "array for existing parent ("+type+") of wrong size " + a.columns();
                 }
                 FloatArrayVector wordVector = new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat());
                 assert wordVector.dimension() == layerSize : "wrong size of averaged word vector " + wordVector.dimension()
