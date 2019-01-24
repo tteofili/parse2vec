@@ -146,9 +146,9 @@ class Parse2VecUtils {
         for (Parse topParse : topParses) {
             // exclude TOPs
             for (Parse p : topParse.getChildren()) {
-                Parse[] tagNodes = p.getTagNodes();
+                Parse[] leaves = p.getTokenNodes();
                 // record pt embeddings for leaf nodes
-                for (Parse tn : tagNodes) {
+                for (Parse tn : leaves) {
                     String coveredText = tokenizerFactory.create(tn.getCoveredText()).hasMoreTokens() ?
                             tokenizerFactory.create(tn.getCoveredText()).nextToken() : tn.getCoveredText();
                     INDArray vector = wordVectors.getWordVectorMatrix(coveredText);
@@ -177,7 +177,7 @@ class Parse2VecUtils {
                 // all leaf pt embeddings have been added
 
                 // recurse bottom up until TOP
-                getPTEmbeddings(ptEmbeddings, layerSize, tagNodes);
+                getPTEmbeddings(ptEmbeddings, layerSize, leaves);
             }
         }
     }
@@ -207,10 +207,24 @@ class Parse2VecUtils {
                             INDArray vector = Nd4j.create(childVector.toFloatBuffer().array());
                             ar[i] = vector != null ? vector : Nd4j.zeros(1, layerSize);
                         } else {
-                            ar[i] = Nd4j.zeros(1, layerSize);
+                            getPTEmbeddings(ptEmbeddings, layerSize, child.getChildren());
+                            childVector = ptEmbeddings.get(childType);
+                            if (childVector != null) {
+                                INDArray vector = Nd4j.create(childVector.toFloatBuffer().array());
+                                ar[i] = vector != null ? vector : Nd4j.zeros(1, layerSize);
+                            } else {
+                                ar[i] = Nd4j.zeros(layerSize);
+                            }
                         }
                     } else {
-                        ar[i] = Nd4j.zeros(1, layerSize);
+                        getPTEmbeddings(ptEmbeddings, layerSize, child.getChildren());
+                        WordVector childVector = ptEmbeddings.get(childType);
+                        if (childVector != null) {
+                            INDArray vector = Nd4j.create(childVector.toFloatBuffer().array());
+                            ar[i] = vector != null ? vector : Nd4j.zeros(1, layerSize);
+                        } else {
+                            ar[i] = Nd4j.zeros(layerSize);
+                        }
                     }
                     i++;
                 }

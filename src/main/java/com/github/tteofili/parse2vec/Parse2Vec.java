@@ -52,7 +52,7 @@ public class Parse2Vec {
 
             // train word embeddings
             int layerSize = args.length > 1 && args[1] != null ? Integer.parseInt(args[1]) : 100;
-            LuceneTokenizerFactory tokenizerFactory = new LuceneTokenizerFactory();
+            LuceneTokenizerFactory tokenizerFactory = new LuceneTokenizerFactory(AnalysisUtils.simpleAnalyzer());
             Word2Vec word2Vec = new Word2Vec.Builder()
                     .tokenizerFactory(tokenizerFactory)
                     .epochs(5)
