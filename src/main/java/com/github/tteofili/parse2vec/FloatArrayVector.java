@@ -15,6 +15,15 @@ class FloatArrayVector implements WordVector {
     this.vector = vector;
   }
 
+  FloatArrayVector(double[] vector) {
+    this.vector = new float[vector.length];
+    int i = 0;
+    for (double d : vector) {
+      this.vector[i] = (float) d;
+      i++;
+    }
+  }
+
   @Override
   public WordVectorType getDataType() {
     return WordVectorType.FLOAT;

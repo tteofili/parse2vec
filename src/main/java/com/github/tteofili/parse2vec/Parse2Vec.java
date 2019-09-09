@@ -7,6 +7,7 @@ import opennlp.tools.sentdetect.SentenceDetectorME;
 import opennlp.tools.sentdetect.SentenceModel;
 import opennlp.tools.util.wordvector.WordVector;
 import org.apache.commons.io.IOUtils;
+import org.deeplearning4j.models.embeddings.loader.WordVectorSerializer;
 import org.deeplearning4j.models.embeddings.wordvectors.WordVectors;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 import org.deeplearning4j.text.documentiterator.FileDocumentIterator;
@@ -25,9 +26,11 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.stream.DoubleStream;
+import java.util.stream.IntStream;
 
 /**
- * Basic runner for pars2vec over a directory of text files
+ * Basic runner for parse2vec over a directory of text files
  */
 public class Parse2Vec {
 
@@ -55,11 +58,13 @@ public class Parse2Vec {
             LuceneTokenizerFactory tokenizerFactory = new LuceneTokenizerFactory(AnalysisUtils.simpleAnalyzer());
             Word2Vec word2Vec = new Word2Vec.Builder()
                     .tokenizerFactory(tokenizerFactory)
-                    .epochs(5)
+                    .epochs(10)
                     .layerSize(layerSize)
                     .iterate(new FileDocumentIterator(path.toFile()))
                     .build();
             word2Vec.fit();
+
+            EmbeddingsUtils.writeEmbeddingsAsSSV(word2Vec.getLookupTable(), "plain", 3);
 
             SentenceModel sentenceModel = new SentenceModel(sentenceModelStream);
             SentenceDetectorME sentenceDetector = new SentenceDetectorME(sentenceModel);
@@ -71,14 +76,18 @@ public class Parse2Vec {
 
             if (dir.listFiles() != null) {
                 MapWordVectorTable ptEmbeddings = extractPTEmbeddings(layerSize, word2Vec, sentenceDetector, parser, dir, tokenizerFactory);
+                ptEmbeddings = normalize(ptEmbeddings);
                 checkEmbeddings(ptEmbeddings, layerSize);
                 EmbeddingsUtils.writeEmbeddingsAsTSV(ptEmbeddings, "pt-tag", 1);
+                EmbeddingsUtils.writeEmbeddingsAsSSV(ptEmbeddings, "pt-tag", 3);
 
                 MapWordVectorTable parsePathWordEmbeddings = extractPTPathWordEmbeddings(word2Vec, sentenceDetector, parser,
                         dir, ptEmbeddings, tokenizerFactory);
+                parsePathWordEmbeddings = normalize(parsePathWordEmbeddings);
                 checkEmbeddings(ptEmbeddings, layerSize);
                 checkEmbeddings(parsePathWordEmbeddings, layerSize);
                 EmbeddingsUtils.writeEmbeddingsAsTSV(parsePathWordEmbeddings, "pt-word", 1);
+                EmbeddingsUtils.writeEmbeddingsAsSSV(parsePathWordEmbeddings, "pt-word", 3);
 
                 MapWordVectorTable parsePathSentenceEmbeddings = extractPTPathSentenceEmbeddings(sentenceDetector,
                         parser, dir, ptEmbeddings, parsePathWordEmbeddings, 3, Method.CLUSTER, layerSize, tokenizerFactory);
@@ -86,12 +95,31 @@ public class Parse2Vec {
                 checkEmbeddings(parsePathWordEmbeddings, layerSize);
                 checkEmbeddings(parsePathSentenceEmbeddings, layerSize);
                 EmbeddingsUtils.writeEmbeddingsAsTSV(parsePathSentenceEmbeddings, "pt-sentence", 1);
+                EmbeddingsUtils.writeEmbeddingsAsSSV(parsePathSentenceEmbeddings, "pt-sentence", 3);
             }
 
         } finally {
             sentenceModelStream.close();
             parserModelStream.close();
         }
+    }
+
+    private static MapWordVectorTable normalize(MapWordVectorTable embeddings) {
+        MapWordVectorTable normalizedEmbeddings = new MapWordVectorTable(new HashMap<>());
+        Iterator<String> tokens = embeddings.tokens();
+        while (tokens.hasNext()) {
+            String row = tokens.next();
+            double[] array = embeddings.get(row).toDoubleBuffer().array();
+            double sum = 0;
+            for (double d : array) {
+                sum += Math.pow(d, 2);
+            }
+            sum = Math.sqrt(sum);
+            double finalSum = sum;
+            double[] normalized = DoubleStream.of(array).map(p -> p / finalSum).toArray();
+            normalizedEmbeddings.put(row, new FloatArrayVector(normalized));
+        }
+        return normalizedEmbeddings;
     }
 
     private static void checkEmbeddings(MapWordVectorTable embeddings, int layerSize) {

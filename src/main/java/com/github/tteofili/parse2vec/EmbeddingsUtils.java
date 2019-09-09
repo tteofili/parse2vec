@@ -2,14 +2,70 @@ package com.github.tteofili.parse2vec;
 
 import org.apache.commons.math3.linear.MatrixUtils;
 import org.apache.commons.math3.linear.SingularValueDecomposition;
+import org.deeplearning4j.models.embeddings.WeightLookupTable;
+import org.deeplearning4j.models.word2vec.VocabWord;
 import org.nd4j.linalg.api.ndarray.INDArray;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.util.Collection;
 import java.util.Iterator;
 
 class EmbeddingsUtils {
+
+    static void writeEmbeddingsAsSSV(MapWordVectorTable wordVectorTable, String prefix, int decimals) throws IOException {
+        double rounding = Math.pow(10, decimals);
+        Charset charset = Charset.forName("UTF-8");
+        byte[] spaceBytes = "\t".getBytes(charset);
+        byte[] crBytes = "\n".getBytes(charset);
+
+        FileOutputStream vectorsFileStream = new FileOutputStream(prefix + "-vectors.txt");
+        Iterator<String> tokens = wordVectorTable.tokens();
+        try {
+            while (tokens.hasNext()) {
+                String pt = tokens.next();
+                vectorsFileStream.write(pt.getBytes(charset));
+                vectorsFileStream.write(spaceBytes);
+                float[] array = wordVectorTable.get(pt).toFloatBuffer().array();
+                for (float f : array) {
+                    double v = Math.round(f * rounding) / rounding;
+                    vectorsFileStream.write(String.valueOf(v).getBytes(charset));
+                    vectorsFileStream.write(spaceBytes);
+                }
+                vectorsFileStream.write(crBytes);
+            }
+        } finally {
+            vectorsFileStream.flush();
+            vectorsFileStream.close();
+        }
+    }
+
+    static void writeEmbeddingsAsSSV(WeightLookupTable wordVectorTable, String prefix, int decimals) throws IOException {
+        double rounding = Math.pow(10, decimals);
+        Charset charset = Charset.forName("UTF-8");
+        byte[] spaceBytes = "\t".getBytes(charset);
+        byte[] crBytes = "\n".getBytes(charset);
+
+        FileOutputStream vectorsFileStream = new FileOutputStream(prefix + "-vectors.txt");
+        Collection<VocabWord> tokens = wordVectorTable.getVocabCache().tokens();
+        try {
+            for (VocabWord token : tokens) {
+                vectorsFileStream.write(token.getWord().getBytes(charset));
+                vectorsFileStream.write(spaceBytes);
+                float[] array = wordVectorTable.vector(token.getWord()).toFloatVector();
+                for (float f : array) {
+                    double v = Math.round(f * rounding) / rounding;
+                    vectorsFileStream.write(String.valueOf(v).getBytes(charset));
+                    vectorsFileStream.write(spaceBytes);
+                }
+                vectorsFileStream.write(crBytes);
+            }
+        } finally {
+            vectorsFileStream.flush();
+            vectorsFileStream.close();
+        }
+    }
 
     static void writeEmbeddingsAsTSV(MapWordVectorTable wordVectorTable, String prefix, int decimals) throws IOException {
         double rounding = Math.pow(10, decimals);
