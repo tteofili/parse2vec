@@ -129,9 +129,9 @@ class Parse2VecUtils {
                                 INDArray[] ind = new INDArray[2];
                                 ind[0] = Nd4j.create(existingWordVector.toFloatBuffer().array());
                                 ind[1] = originalWordVector;
-                                parsePathWordEmbeddings.put(word, new FloatArrayVector(Nd4j.averageAndPropagate(ind).data().asFloat()));
+                                parsePathWordEmbeddings.put(word, new FloatArrayVector(Nd4j.averageAndPropagate(ind).toFloatVector()));
                             } else {
-                                parsePathWordEmbeddings.put(word, new FloatArrayVector(originalWordVector.data().asFloat()));
+                                parsePathWordEmbeddings.put(word, new FloatArrayVector(originalWordVector.toFloatVector()));
                             }
                         }
                     }
@@ -156,14 +156,14 @@ class Parse2VecUtils {
                         String type = tn.getType();
                         if (type != null && type.trim().length() > 0) {
                             if (ptEmbeddings.get(type) == null) {
-                                ptEmbeddings.put(type, new FloatArrayVector(vector.data().asFloat()));
+                                ptEmbeddings.put(type, new FloatArrayVector(vector.toFloatVector()));
                             } else {
                                 INDArray[] ar = new INDArray[2];
                                 WordVector wordVector = ptEmbeddings.get(type);
                                 if (wordVector != null && wordVector.dimension() == layerSize) {
                                     ar[0] = Nd4j.create(wordVector.toFloatBuffer().array());
                                     ar[1] = vector.dup();
-                                    FloatArrayVector avg = new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat());
+                                    FloatArrayVector avg = new FloatArrayVector(Nd4j.averageAndPropagate(ar).toFloatVector());
                                     assert avg.dimension() == layerSize : "wrong size of averaged word vector " + avg.dimension()
                                             + " for type " + type;
                                     ptEmbeddings.put(type, avg);
@@ -239,7 +239,7 @@ class Parse2VecUtils {
                         j++;
                     } else assert existingParentVector == null || existingParentVector.dimension() == layerSize : "array for existing parent ("+type+") of wrong size " + a.columns();
                 }
-                FloatArrayVector wordVector = new FloatArrayVector(Nd4j.averageAndPropagate(ar).data().asFloat());
+                FloatArrayVector wordVector = new FloatArrayVector(Nd4j.averageAndPropagate(ar).toFloatVector());
                 assert wordVector.dimension() == layerSize : "wrong size of averaged word vector " + wordVector.dimension()
                     + " for type " + type;
                 ptEmbeddings.put(parent.getType(), wordVector);
